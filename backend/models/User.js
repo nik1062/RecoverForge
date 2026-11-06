@@ -17,13 +17,15 @@ const userSchema = new mongoose.Schema({
   isBanned: { type: Boolean, default: false },
   otp: { type: String, select: false },
   otpExpiry: { type: Date, select: false },
+  
+  // Merchant Recovery Configuration (Phase 2)
+  businessName: { type: String, default: '', trim: true },
+  senderName: { type: String, default: '', trim: true },
+  replyToEmail: { type: String, default: '', trim: true, lowercase: true },
+  agentActive: { type: Boolean, default: true }, // Master kill switch for recovery agent
+
   role: { type: String, default: '' },
-  goal: { type: String, default: '' },
-  preferences: {
-    tone: { type: String, default: 'professional' },
-    emailLength: { type: String, default: 'medium' },
-    industry: { type: String, default: '' }
-  }
+  goal: { type: String, default: '' }
 }, { timestamps: true });
 
 userSchema.pre('save', async function (next) {
