@@ -32,6 +32,10 @@ describe('RecoverForge Core Verification Suite', () => {
     if (mongoose.connection.readyState !== 1) {
       mongoose.set('bufferCommands', false);
 
+      const mockMerchantId = new mongoose.Types.ObjectId();
+      const mockMerchant = { _id: mockMerchantId, agentActive: true };
+      let demoCount = 0;
+
       jest.spyOn(WebhookEvent, 'findOne').mockImplementation(async ({ eventId }) => {
         return memoryEvents.has(eventId) ? { eventId } : null;
       });
@@ -40,10 +44,13 @@ describe('RecoverForge Core Verification Suite', () => {
         return { eventId, eventType };
       });
       jest.spyOn(FailedPayment, 'findOne').mockImplementation(async () => null);
-      jest.spyOn(FailedPayment, 'create').mockImplementation(async (data) => data);
+      jest.spyOn(FailedPayment, 'create').mockImplementation(async (data) => {
+        demoCount++;
+        return { _id: new mongoose.Types.ObjectId(), ...data };
+      });
+      jest.spyOn(FailedPayment, 'countDocuments').mockImplementation(async () => demoCount);
       jest.spyOn(FailedPayment, 'findOneAndUpdate').mockImplementation(async () => null);
       jest.spyOn(AgentAction, 'create').mockImplementation(async (data) => data);
-      const mockMerchant = { _id: 'mock_m_1', agentActive: true };
       jest.spyOn(User, 'findOne').mockReturnValue({
         sort: jest.fn().mockResolvedValue(mockMerchant),
         then: (resolve) => resolve(mockMerchant)
@@ -216,15 +223,16 @@ describe('RecoverForge Core Verification Suite', () => {
 
   describe('6. Demo Seed Script Idempotency', () => {
     it('handles idempotent execution when seeded data already exists', async () => {
-      if (mongoose.connection.readyState === 1) {
-        const res1 = await seed({ reset: false });
-        expect(res1.success).toBe(true);
-
-        // Second run must recognize existing count and not duplicate
-        const res2 = await seed({ reset: false });
-        expect(res2.success).toBe(true);
-        expect(res2.idempotent).toBe(true);
+      const res1 = await seed({ reset: false });
+      if (!res1.success && res1.reason === 'no_mongo') {
+        return;
       }
+      expect(res1.success).toBe(true);
+
+      // Second run must recognize existing count and not duplicate
+      const res2 = await seed({ reset: false });
+      expect(res2.success).toBe(true);
+      expect(res2.idempotent).toBe(true);
     });
   });
 });
