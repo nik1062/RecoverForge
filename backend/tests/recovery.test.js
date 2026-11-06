@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test_jwt_secret_for_unit_tests_123456';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'test_webhook_secret_key_7890';
+process.env.FORCE_AI_FALLBACK = 'true';
 
 const app = require('../server');
 const WebhookEvent = require('../models/WebhookEvent');
@@ -13,6 +14,7 @@ const AgentAction = require('../models/AgentAction');
 const User = require('../models/User');
 const { ruleBasedClassification, calculateNextActionAt, classifyFailure } = require('../services/aiClassifier');
 const { getNextFollowUpInterval, runSchedulerTick } = require('../services/schedulerService');
+const { formatRupees, createRecoveryLink, generateRecoveryEmail, sendRecoveryEmail } = require('../services/recoveryService');
 const { seed } = require('../scripts/seedDemo');
 
 describe('RecoverForge Core Verification Suite', () => {
@@ -233,6 +235,112 @@ describe('RecoverForge Core Verification Suite', () => {
       const res2 = await seed({ reset: false });
       expect(res2.success).toBe(true);
       expect(res2.idempotent).toBe(true);
+    });
+  });
+
+  describe('7. Customer Opt-Out Flow (GET /optout/:token)', () => {
+    it('returns 404 for unknown or missing opt-out token', async () => {
+      const res = await request(app).get('/optout/non_existent_token_123');
+      expect(res.status).toBe(404);
+      expect(res.text).toMatch(/Invalid or expired opt-out link/i);
+    });
+
+    it('renders unsubscribe confirmation page for valid opt-out token', async () => {
+      const validToken = 'test_token_valid_abc123';
+      if (mongoose.connection.readyState !== 1) {
+        jest.spyOn(FailedPayment, 'findOne').mockImplementationOnce(async ({ optOutToken }) => {
+          if (optOutToken === validToken) {
+            return {
+              _id: new mongoose.Types.ObjectId(),
+              merchantId: new mongoose.Types.ObjectId(),
+              customerEmail: 'customer@test.com',
+              status: 'recovering',
+              save: jest.fn().mockResolvedValue(true)
+            };
+          }
+          return null;
+        });
+      }
+
+      const res = await request(app).get(`/optout/${validToken}`);
+      expect(res.status).toBe(200);
+      expect(res.text).toMatch(/You're Unsubscribed/i);
+    });
+  });
+
+  describe('8. Currency Formatting & Money Invariants', () => {
+    it('formats paise into Indian Rupees correctly without double division', () => {
+      expect(formatRupees(99900)).toBe('₹999.00');
+      expect(formatRupees(149900)).toBe('₹1,499.00');
+      expect(formatRupees(49900)).toBe('₹499.00');
+      expect(formatRupees(2499900)).toBe('₹24,999.00');
+    });
+
+    it('handles zero or null paise gracefully', () => {
+      expect(formatRupees(0)).toBe('₹0.00');
+      expect(formatRupees(null)).toBe('₹0.00');
+    });
+  });
+
+  describe('9. Recovery Email Copy & Preview Fallback', () => {
+    it('generates email copy with 1-click opt-out and payment link', async () => {
+      const mockPayment = {
+        _id: new mongoose.Types.ObjectId(),
+        amount: 149900,
+        currency: 'INR',
+        customerEmail: 'buyer@test.com',
+        optOutToken: 'test_optout_xyz',
+        paymentLinkUrl: 'https://rzp.io/l/test_link_123',
+        classification: {
+          category: 'insufficient_funds',
+          reasoning: 'Card balance was low'
+        }
+      };
+      const mockMerchant = {
+        _id: new mongoose.Types.ObjectId(),
+        businessName: 'Apex Cloud',
+        email: 'billing@apexcloud.io'
+      };
+
+      const emailCopy = await generateRecoveryEmail(mockPayment, mockMerchant, 1);
+      expect(emailCopy.subject).toBeDefined();
+      expect(emailCopy.subject.length).toBeGreaterThan(5);
+      expect(emailCopy.body).toMatch(/https:\/\/rzp\.io\/l\/test_link_123/);
+      expect(emailCopy.body).toMatch(/optout/);
+    });
+
+    it('falls back to simulated preview mode when RESEND_API_KEY is not configured', async () => {
+      const result = await sendRecoveryEmail(
+        { customerEmail: 'buyer@test.com' },
+        { email: 'merchant@test.com', replyToEmail: 'support@test.com' },
+        { subject: 'Payment Reminder', body: 'Please pay your balance' }
+      );
+
+      expect(result.sent).toBe(false);
+      expect(result.mode).toBe('simulated_preview');
+      expect(result.message).toMatch(/sending disabled/i);
+      expect(result.subject).toBe('Payment Reminder');
+    });
+  });
+
+  describe('10. Recovery Link Generator Fallback Mode', () => {
+    it('generates fallback payment link without throwing when gateway keys are missing', async () => {
+      const mockPayment = {
+        _id: new mongoose.Types.ObjectId(),
+        razorpayPaymentId: 'pay_test_fallback_123',
+        amount: 149900,
+        currency: 'INR',
+        customerEmail: 'buyer@test.com'
+      };
+      const mockMerchant = {
+        _id: new mongoose.Types.ObjectId()
+      };
+
+      const link = await createRecoveryLink(mockPayment, mockMerchant);
+      expect(link.id).toBeDefined();
+      expect(link.short_url).toBeDefined();
+      expect(link.short_url).toMatch(/demo-store/);
+      expect(link.isSimulated).toBe(true);
     });
   });
 });
