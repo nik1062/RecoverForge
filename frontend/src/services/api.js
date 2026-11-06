@@ -6,7 +6,7 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('mf_token');
+  const token = localStorage.getItem('rf_token') || localStorage.getItem('mf_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -15,16 +15,16 @@ api.interceptors.response.use(
   (res) => res,
   (error) => {
     if (error.response?.status === 401) {
-      // Don't redirect if it's a login attempt or if we are already on auth pages
       const isAuthPath = window.location.pathname.includes('/login') || 
                          window.location.pathname.includes('/signup') || 
-                         window.location.pathname.includes('/verify');
+                         window.location.pathname.includes('/verify') ||
+                         window.location.pathname.includes('/demo-store');
       
       const isLoginRequest = error.config.url.endsWith('/auth/login');
 
       if (!isAuthPath && !isLoginRequest) {
-        localStorage.removeItem('mf_token');
-        localStorage.removeItem('mf_user');
+        localStorage.removeItem('rf_token');
+        localStorage.removeItem('rf_user');
         window.location.href = '/login';
       }
     }
@@ -42,16 +42,16 @@ export const authAPI = {
   updateProfile: (data) => api.put('/auth/profile', data)
 };
 
-// Email API
-export const emailAPI = {
-  generate: (data) => api.post('/emails/generate', data),
-  generateFollowUp: (data) => api.post('/emails/generate-followup', data),
-  getHistory: (params) => api.get('/emails/history', { params }),
-  getById: (id) => api.get(`/emails/history/${id}`),
-  delete: (id) => api.delete(`/emails/history/${id}`)
+// Failures & Recovery Agent API
+export const failureAPI = {
+  getFailures: (params) => api.get('/failures', { params }),
+  getFailureDetail: (id) => api.get(`/failures/${id}`),
+  getTimeline: (id) => api.get(`/failures/${id}/timeline`),
+  simulateFailure: (data) => api.post('/failures/simulate', data),
+  updateSettings: (data) => api.put('/failures/settings', data)
 };
 
-// Payment API
+// Payment & Plan API
 export const paymentAPI = {
   createOrder: (plan) => api.post('/payments/create-order', { plan }),
   verifyPayment: (data) => api.post('/payments/verify', data),
@@ -64,7 +64,6 @@ export const adminAPI = {
   getUsers: (params) => api.get('/admin/users', { params }),
   getUserDetail: (id) => api.get(`/admin/users/${id}`),
   updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
-  getEmailLogs: (params) => api.get('/admin/emails', { params }),
   getTransactions: (params) => api.get('/admin/transactions', { params })
 };
 
@@ -74,12 +73,5 @@ export const login = (data) => authAPI.login(data);
 export const verifyOTP = (data) => authAPI.verifyOTP(data);
 export const resendOTP = (data) => authAPI.resendOTP(data);
 export const updateProfile = (data) => authAPI.updateProfile(data);
-export const generateEmail = (data) => emailAPI.generate(data);
-export const generateFollowUp = (data) => emailAPI.generateFollowUp(data);
-export const getHistory = (params) => emailAPI.getHistory(params);
-export const deleteHistory = (id) => emailAPI.delete(id);
-export const createOrder = (plan) => paymentAPI.createOrder(plan);
-export const verifyPayment = (data) => paymentAPI.verifyPayment(data);
-export const getTransactions = () => paymentAPI.getTransactions();
 
 export default api;

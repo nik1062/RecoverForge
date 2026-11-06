@@ -1,264 +1,190 @@
-#Hii welcome 🤗 🙂 
-# MailForge ⚡ — AI Cold Email SaaS
+# RecoverForge ⚡ — Autonomous AI Agent for Razorpay Payment Recovery
+> **Turn failed Razorpay checkouts into settled revenue autonomously.** RecoverForge intercepts `payment.failed` webhooks, classifies root causes via GPT-4o-mini, generates fresh Razorpay Payment Links, and conducts personalized, empathetic email recovery cadences that stop automatically when the customer pays.
 
-> **Write cold emails that actually get replies.** MailForge uses GPT-4o to generate hyper-personalized cold emails and follow-up sequences in seconds.
+*Built for the Razorpay AI Buildathon — Track 3: AI Revenue Recovery.*
 
 ---
 
 ## What Problem Does It Solve?
 
-Most B2B salespeople and founders send generic, template-based cold emails that get ignored. MailForge solves this by:
+In Indian online commerce, over **20% of checkouts fail** due to insufficient balance, bank 3D-Secure timeouts, UPI app drop-offs, or transient gateway network glitches. Today, merchants lose these customers permanently because:
+1. Standard payment failure notifications are sterile, robotic error codes that confuse buyers.
+2. Merchants have no automated mechanism to generate an instant, 1-click alternative payment link.
+3. Sending manual outreach is impossible at scale and often triggers after the buyer has already abandoned.
 
-- **Personalization at scale** — Input your prospect's pain points, company, and your offer; get a perfectly tailored email
-- **AI-powered copywriting** — GPT-4o writes emails that sound human, not like a bot
-- **Follow-up sequences** — Auto-generate 3-part follow-up sequences (Day 3, Day 7, Day 14)
-- **Credit system** — Pay-as-you-go with Razorpay; 50 free credits on signup
-- **Email history** — All generated emails saved for review, copy, and reuse
-- **Admin Dashboard** — Full platform management for operators
+**RecoverForge bridges the gap:** It perceives failed transactions within seconds of occurrence, diagnoses the exact failure mode using telemetry semantics, generates a 48-hour Razorpay Payment Link, and runs a gentle, context-aware recovery sequence.
+
+---
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    subgraph Razorpay["Razorpay Gateway"]
+        WH["Webhook Event\n(payment.failed)"]
+        LinkAPI["Payment Links API\n(razorpay.paymentLink.create)"]
+        PaidWH["Webhook Event\n(payment_link.paid / payment.captured)"]
+    end
+
+    subgraph RecoverForge["RecoverForge Engine"]
+        Endpoint["POST /webhooks/razorpay\n(Raw Body + Timing-Safe HMAC)"]
+        Idem{"Idempotency\nCheck"}
+        Classifier["AI Failure Classifier\n(GPT-4o-mini + Rule Fallback)"]
+        Safety{"Safety Guard\nFraud / Unsub?"}
+        LinkGen["Payment Link Creator\n(Amount in Paise)"]
+        Copywriter["Empathetic Copywriter\n(Category-Tuned Copy)"]
+        EmailService["Resend / Preview Engine"]
+        Scheduler["Follow-up Scheduler\n(node-cron + Atomic Lock)"]
+        DB[(MongoDB)]
+    end
+
+    subgraph Customer["Customer Experience"]
+        Inbox["Personalized Email\n(1-Click Pay + Opt-out)"]
+        Checkout["Instant Pay Link"]
+    end
+
+    WH -->|HMAC-SHA256| Endpoint
+    Endpoint --> Idem
+    Idem -->|New Event| Classifier
+    Idem -->|Duplicate| DB
+    Classifier --> Safety
+    Safety -->|Pass| LinkGen
+    Safety -->|Fraud / Opt-out| DB
+    LinkGen --> LinkAPI
+    LinkAPI --> LinkGen
+    LinkGen --> Copywriter
+    Copywriter --> EmailService
+    EmailService --> Inbox
+    Inbox --> Checkout
+    Checkout --> PaidWH
+    PaidWH --> Endpoint
+    Endpoint -->|Mark Recovered| Scheduler
+    Scheduler -->|Halt Outreach| DB
+```
 
 ---
 
 ## Tech Stack
 
-| Layer     | Technology                          |
-|-----------|-------------------------------------|
-| Frontend  | React 18 + Vite + Tailwind CSS      |
-| Backend   | Node.js + Express                   |
-| Database  | MongoDB + Mongoose                  |
-| Auth      | JWT + OTP email verification        |
-| AI        | OpenAI GPT-4o-mini                  |
-| Payments  | Razorpay                            |
-| Email     | Nodemailer (Gmail SMTP)             |
-| Deploy    | Docker + Docker Compose             |
+| Layer | Technology | Purpose |
+|---|---|---|
+| **Frontend** | React 18 + Vite + Tailwind CSS | Responsive merchant dashboard & audit trail drawer |
+| **Backend** | Node.js + Express | REST APIs, raw webhook stream, rate-limiting |
+| **Database** | MongoDB + Mongoose | Failed payments, idempotency events, action timelines |
+| **Security** | Helmet + HMAC-SHA256 | Cryptographic verification via `crypto.timingSafeEqual` |
+| **AI / LLM** | OpenAI `gpt-4o-mini` | Root-cause telemetry classification & empathetic copy |
+| **Payments** | Razorpay SDK (`^2.9.2`) | Orders, checkout, and Payment Links API |
+| **Outreach** | Resend API + Nodemailer | Recovery dispatch (with automated preview fallback) |
+| **Scheduler** | `node-cron` | Multi-day follow-up cadences with atomic job locks |
+| **DevOps** | Docker Compose + GitHub Actions | Automated CI testing & EC2 PM2 deployment |
 
 ---
 
-## Features
+## Core Recovery Flow
 
-### User Features
-- Signup with email OTP verification
-- Login / logout with JWT
-- Dashboard with credit usage stats
-- Generate cold emails (costs 5 credits)
-- Generate 3-part follow-up sequences (costs 3 credits)
-- Email history with search and delete
-- One-click copy to clipboard
-- Billing page with Razorpay integration
-- Profile settings
-
-### Admin Dashboard (`/admin`)
-- Platform overview — total users, emails, revenue stats
-- User management — search, filter, verify, ban, change plan, add credits
-- Email logs — view all generated emails across the platform
-- Transaction history — all payments with status
+1. **Failure Ingestion:** Razorpay dispatches `payment.failed`. RecoverForge parses the raw request stream, verifies the HMAC-SHA256 signature against `RAZORPAY_WEBHOOK_SECRET` using `crypto.timingSafeEqual`, and checks idempotency via `X-Razorpay-Event-Id`.
+2. **AI Classification:** Telemetry (`errorCode`, `errorReason`, `errorStep`, `errorSource`) is evaluated by `gpt-4o-mini`. The agent categorizes the failure into `insufficient_funds`, `bank_decline`, `user_dropoff`, `technical_error`, or `fraud_suspected`.
+3. **Safety Evaluation:** Suspected fraud or high-risk transactions are immediately marked `abandoned` and **never** emailed.
+4. **Link Creation:** The agent creates a dedicated Razorpay Payment Link (`razorpay.paymentLink.create`) preserved for 48 hours.
+5. **Empathetic Copy Generation:** Copy tailored to the failure is synthesized (e.g. gentle reassurance for low balance; technical apology for gateway glitches). Every email contains the payment link and a 1-click opt-out URL.
+6. **Follow-up Cadence & Auto-Halt:** If unsettled, the scheduler attempts a maximum of 3 follow-ups (+1 day, +3 days, +7 days). When `payment_link.paid` or `payment.captured` fires, the sequence halts instantly.
 
 ---
 
-## Bugs Fixed in This Version
-
-| # | Bug | Fix |
-|---|-----|-----|
-| 1 | `Cannot find module '../utils/generateToken'` | Created `backend/utils/generateToken.js` |
-| 2 | Frontend "No matching export" errors | Added named + default exports to `api.js` |
-| 3 | Port 5000 conflict | Changed to port **5001** in `.env` and `vite.config.js` |
-| 4 | OTP page used `loginUser` (undefined) | Changed to `login` — the correct AuthContext export |
-| 5 | Dashboard read `res.data.emails` | Fixed to `res.data.data` to match API response |
-| 6 | GeneratePage read `res.data.email` | Fixed to `res.data.data` |
-| 7 | Routes `/verify-otp` vs `/verify` mismatch | Added both routes in `App.jsx` |
-| 8 | Email route mismatch `/api/email` vs `/api/emails` | Standardized to `/api/emails` everywhere |
-| 9 | No admin user system | Added `isAdmin`, `isBanned` to User model + admin middleware + admin routes |
-| 10 | MongoDB not running | Instructions below — MongoDB Atlas recommended |
-
----
-
-## Quick Start
+## Quick Start & Local Run
 
 ### Prerequisites
-- Node.js 18+
-- MongoDB (local or Atlas)
-- OpenAI API key
-- Gmail account with App Password
+* Node.js 18+
+* MongoDB running locally or Atlas URI
+* Razorpay Test Account credentials
+* OpenAI API Key (optional: rule-based fallback active if omitted)
 
-### Option A — Docker (Recommended)
-
+### Option A — Local Development
 ```bash
-git clone <your-repo>
-cd mailforge
+# 1. Clone repository
+git clone https://github.com/nik1062/RecoverForge.git
+cd RecoverForge
 
-# Edit backend/.env with your keys (copy from .env.example)
-cp backend/.env backend/.env.local
+# 2. Setup backend
+cd backend
+npm install
+cp .env.example .env
+# Fill your keys in .env
+npm run dev # Starts on port 5000
 
-# Start everything
+# 3. Setup frontend
+cd ../frontend
+npm install
+npm run dev # Starts on port 5173
+```
+
+### Option B — Docker Compose
+```bash
 docker-compose up -d
-
-# Create admin user
-docker exec mailforge_backend node scripts/createAdmin.js
 ```
-
-### Option B — Local Setup
-
-#### 1. Start MongoDB
-
-**MongoDB Atlas (easiest):**
-1. Go to mongodb.com/atlas and create a free cluster
-2. Copy your connection URI  
-3. Set `MONGODB_URI=mongodb+srv://...` in `backend/.env`
-
-**Local MongoDB:**
-```bash
-# macOS
-brew install mongodb-community && brew services start mongodb-community
-
-# Ubuntu
-sudo systemctl start mongod
-
-# Windows: Start MongoDB from Services panel
-```
-
-#### 2. Backend Setup
-
-```bash
-cd backend
-npm install
-# Edit .env with your credentials
-npm run dev   # Starts on port 5001
-```
-
-#### 3. Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev   # Starts on port 5173
-```
-
-#### 4. Create Admin User
-
-```bash
-cd backend
-node scripts/createAdmin.js
-```
-
-Default admin credentials:
-- Email: `admin@mailforge.com`
-- Password: `Admin@123456`
-
-Admin panel: **http://localhost:5173/admin**
 
 ---
 
 ## Environment Variables
 
-Create `backend/.env`:
+Configure these in `backend/.env` (reference: `.env.example`):
 
-```env
-PORT=5001
-NODE_ENV=development
-
-# MongoDB
-MONGODB_URI=mongodb://localhost:27017/mailforge
-
-# JWT
-JWT_SECRET=your_super_secret_jwt_key_here
-JWT_EXPIRES_IN=7d
-
-# Gmail SMTP
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
-SMTP_FROM=MailForge <your-email@gmail.com>
-
-# OpenAI
-OPENAI_API_KEY=sk-...
-
-# Razorpay
-RAZORPAY_KEY_ID=rzp_test_...
-RAZORPAY_KEY_SECRET=your_secret
-
-# CORS
-FRONTEND_URL=http://localhost:5173
-```
-
-### Gmail App Password
-1. Enable 2FA on your Google account
-2. Go to Google Account > Security > App Passwords
-3. Create an App Password for "Mail"
-4. Use the 16-character code as `SMTP_PASS`
+| Variable | Description |
+|---|---|
+| `PORT` | Backend server port (standardized to `5000`) |
+| `NODE_ENV` | `development` or `production` |
+| `FRONTEND_URL` | Allowed origin for CORS (e.g. `http://localhost:5173`) |
+| `MONGODB_URI` | MongoDB connection URI |
+| `JWT_SECRET` | Secret key for auth tokens (server refuses startup if missing) |
+| `RAZORPAY_KEY_ID` | Razorpay Key ID |
+| `RAZORPAY_KEY_SECRET` | Razorpay Key Secret |
+| `RAZORPAY_WEBHOOK_SECRET` | Secret configured in Razorpay dashboard webhooks |
+| `DEFAULT_MERCHANT_ID` | Fallback merchant ID if not specified in checkout notes |
+| `OPENAI_API_KEY` | OpenAI API key for `gpt-4o-mini` |
+| `RESEND_API_KEY` | Resend API key (optional: preview mode active if omitted) |
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | SMTP configuration for merchant OTP verification |
 
 ---
 
-## Project Structure
+## Running the Interactive Demo
 
-```
-mailforge/
-├── backend/
-│   ├── config/db.js
-│   ├── controllers/
-│   │   ├── authController.js
-│   │   ├── emailController.js
-│   │   ├── paymentController.js
-│   │   └── adminController.js     ← NEW
-│   ├── middleware/
-│   │   ├── auth.js                ← Updated with adminOnly
-│   │   └── errorHandler.js
-│   ├── models/
-│   │   ├── User.js                ← Updated with isAdmin, isBanned
-│   │   ├── EmailHistory.js
-│   │   └── Transaction.js
-│   ├── routes/
-│   │   ├── auth.js
-│   │   ├── email.js
-│   │   ├── payment.js
-│   │   └── admin.js               ← NEW
-│   ├── utils/
-│   │   ├── generateToken.js       ← NEW (was missing)
-│   │   ├── generateOTP.js
-│   │   └── sendEmail.js
-│   ├── scripts/
-│   │   └── createAdmin.js         ← NEW
-│   ├── .env
-│   └── server.js                  ← Updated with /api/admin route
-│
-├── frontend/src/
-│   ├── pages/
-│   │   ├── AdminPage.jsx          ← NEW (4 tabs: Overview, Users, Emails, Txns)
-│   │   └── ... (all other pages fixed)
-│   ├── services/
-│   │   └── api.js                 ← Fixed exports + adminAPI added
-│   └── App.jsx                    ← Fixed routes + admin route added
-│
-└── docker-compose.yml
-```
+1. Open **http://localhost:5173/demo-store**.
+2. **Interactive Simulation:** Click **"Simulate Payment Failure"**. The platform generates a live failure, runs classification, creates a payment link, synthesizes email copy, and updates the Recovery Dashboard in real-time.
+3. **Simulating via Razorpay Test Cards:**
+   - Card ending in `3335`: Simulates **Insufficient Balance**.
+   - Card ending in `0002`: Simulates **Bank Decline**.
+   - Card ending in `1111`: Simulates **Successful Payment**.
+4. **Seed Realistic Demo Dataset:**
+   ```bash
+   cd backend
+   npm run seed:demo
+   ```
+   Generates 20 varied failure transactions with complete audit timelines. Markings display with an explicit "Demo data" badge and can be toggled on/off in the dashboard.
+   ```bash
+   # To clear seeded demo records:
+   npm run seed:demo -- --reset
+   ```
 
 ---
 
-## API Reference
+## Running Automated Tests
 
-### Auth (`/api/auth`)
-| Method | Route | Auth | Description |
-|--------|-------|------|-------------|
-| POST | `/signup` | No | Register + send OTP |
-| POST | `/verify-otp` | No | Verify OTP, get JWT |
-| POST | `/resend-otp` | No | Resend OTP |
-| POST | `/login` | No | Login, get JWT |
-| GET | `/me` | JWT | Get current user |
-| PUT | `/profile` | JWT | Update profile |
+```bash
+cd backend
+npm test
+```
+Executes Jest + Supertest verification covering:
+* Health check endpoint status
+* Webhook signature validation (valid vs invalid)
+* Webhook event idempotency
+* AI classifier fallback on timeout/offline
+* Scheduler concurrency & race-condition safety
+* Seed script idempotency
 
-### Emails (`/api/emails`)
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/generate` | Generate cold email (5 credits) |
-| POST | `/generate-followup` | Generate follow-ups (3 credits) |
-| GET | `/history` | Paginated email history |
-| DELETE | `/history/:id` | Delete email |
+---
 
-### Admin (`/api/admin` — admin only)
-| Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/stats` | Platform overview stats |
-| GET | `/users` | All users with filtering |
-| PUT | `/users/:id` | Update user (verify/ban/plan/credits) |
-| GET | `/emails` | All generated emails |
-| GET | `/transactions` | All payment transactions |
+## Honest Limitations
+
+1. **Deterministic Timing Heuristics:** Timing is mapped via rule-based scheduling (e.g. `retry_next_morning` maps to next 9:00 AM IST for salary/balance refresh). We do not claim dynamic per-customer biometric timing learning.
+2. **Email Delivery Fallback:** If `RESEND_API_KEY` is omitted, the agent logs the generated copy into timeline metadata rather than sending real emails, allowing seamless local evaluation without paid mail accounts.
+3. **Credit Gateway Scaffolding:** Auth, billing and deployment scaffolding reused from my earlier project ColdMailForge; all recovery-agent logic was built for this buildathon.

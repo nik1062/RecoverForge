@@ -90,17 +90,18 @@ const CUSTOMER_NAMES = [
   'Varun Chopra', 'Deepika Pillai', 'Gaurav Bhatia', 'Rhea Mukherjee'
 ];
 
-async function seed() {
-  const isReset = process.argv.includes('--reset');
+async function seed(options = {}) {
+  const isReset = options.reset !== undefined ? options.reset : process.argv.includes('--reset');
 
   try {
     const mongoUri = process.env.MONGODB_URI;
-    if (!mongoUri) {
+    if (!mongoUri && mongoose.connection.readyState === 0) {
       console.error('Error: MONGODB_URI is required to run seed script.');
-      process.exit(1);
+      return { success: false, reason: 'no_mongo' };
     }
-    await mongoose.connect(mongoUri);
-    console.log('Connected to MongoDB');
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(mongoUri);
+    }
 
     // 1. Resolve or create Demo Merchant
     let merchant = await User.findOne({ email: DEMO_MERCHANT_EMAIL.toLowerCase() });
@@ -116,29 +117,24 @@ async function seed() {
         isVerified: true,
         plan: 'premium'
       });
-      console.log(`Created demo merchant: ${DEMO_MERCHANT_EMAIL}`);
     }
 
     // 2. Handle --reset flag
     if (isReset) {
       const deletedPayments = await FailedPayment.deleteMany({ merchantId: merchant._id, isDemoData: true });
       const deletedActions = await AgentAction.deleteMany({ merchantId: merchant._id, isDemoData: true });
-      console.log(`Reset complete: removed ${deletedPayments.deletedCount} demo payments and ${deletedActions.deletedCount} demo actions.`);
-      return;
+      return { success: true, reset: true, deletedPayments: deletedPayments.deletedCount, deletedActions: deletedActions.deletedCount };
     }
 
     // 3. Check Idempotency: If demo records already exist, do not duplicate
     const existingCount = await FailedPayment.countDocuments({ merchantId: merchant._id, isDemoData: true });
     if (existingCount >= 20) {
-      console.log(`Idempotency check: ${existingCount} demo records already exist for ${DEMO_MERCHANT_EMAIL}. Skipping duplication.`);
-      console.log('To reset and re-seed, run: npm run seed:demo -- --reset');
-      return;
+      return { success: true, idempotent: true, count: existingCount, message: 'Already seeded' };
     }
-
-    console.log('Seeding 20 realistic payment failure recovery records...');
 
     const now = Date.now();
     const DAY_MS = 24 * 60 * 60 * 1000;
+    const createdPayments = [];
 
     for (let i = 0; i < 20; i++) {
       const profile = SEED_PROFILES[i % SEED_PROFILES.length];
@@ -146,11 +142,9 @@ async function seed() {
       const customerEmail = `${customerName.toLowerCase().replace(/\s+/g, '.')}@example.com`;
       const contact = `+9198${Math.floor(10000000 + Math.random() * 90000000)}`;
       
-      // Varied amounts between ₹499 and ₹24,999 in paise (49900 to 2499900)
       const baseRupees = [499, 899, 1499, 2499, 3999, 5999, 8499, 12999, 18499, 24999][i % 10];
       const amountPaise = baseRupees * 100;
       
-      // Spread createdAt over last 14 days
       const daysAgo = (14 - (i * 0.65));
       const createdAt = new Date(now - (daysAgo * DAY_MS));
 
@@ -203,8 +197,9 @@ async function seed() {
         updatedAt: recoveredAt || createdAt
       });
 
-      // Matching Timeline Actions
-      // 1. Webhook Received
+      createdPayments.push(payment);
+
+      // Webhook Received
       await AgentAction.create({
         failedPaymentId: payment._id,
         merchantId: merchant._id,
@@ -215,7 +210,7 @@ async function seed() {
         createdAt: new Date(createdAt.getTime() + 1000)
       });
 
-      // 2. Classified
+      // Classified
       await AgentAction.create({
         failedPaymentId: payment._id,
         merchantId: merchant._id,
@@ -226,7 +221,7 @@ async function seed() {
         createdAt: new Date(createdAt.getTime() + 2500)
       });
 
-      // 3. Link Created
+      // Link Created
       await AgentAction.create({
         failedPaymentId: payment._id,
         merchantId: merchant._id,
@@ -237,7 +232,7 @@ async function seed() {
         createdAt: new Date(createdAt.getTime() + 3800)
       });
 
-      // 4. Email Sent
+      // Email Sent
       await AgentAction.create({
         failedPaymentId: payment._id,
         merchantId: merchant._id,
@@ -251,7 +246,6 @@ async function seed() {
         createdAt: new Date(createdAt.getTime() + 5200)
       });
 
-      // 5. Recovered / Followup / Stopped
       if (profile.status === 'recovered') {
         await AgentAction.create({
           failedPaymentId: payment._id,
@@ -283,12 +277,20 @@ async function seed() {
       }
     }
 
-    console.log('Seeded 20 realistic demo records with timelines successfully!');
+    return { success: true, seeded: createdPayments.length };
   } catch (err) {
-    console.error('Seed error:', err.message);
+    return { success: false, error: err.message };
   } finally {
-    await mongoose.disconnect();
+    if (require.main === module && mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
   }
 }
 
-seed();
+if (require.main === module) {
+  seed().then((res) => {
+    console.log('Seed Result:', res);
+  });
+}
+
+module.exports = { seed, SEED_PROFILES };

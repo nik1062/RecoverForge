@@ -11,17 +11,17 @@ const WebhookEvent = require('../models/WebhookEvent');
 const FailedPayment = require('../models/FailedPayment');
 const AgentAction = require('../models/AgentAction');
 const User = require('../models/User');
-const { ruleBasedClassification, calculateNextActionAt } = require('../services/aiClassifier');
-const { getNextFollowUpInterval } = require('../services/schedulerService');
+const { ruleBasedClassification, calculateNextActionAt, classifyFailure } = require('../services/aiClassifier');
+const { getNextFollowUpInterval, runSchedulerTick } = require('../services/schedulerService');
+const { seed } = require('../scripts/seedDemo');
 
 describe('RecoverForge Core Verification Suite', () => {
   beforeAll(async () => {
-    // Connect to in-memory or test MongoDB if available, else mock schemas
     const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/recoverforge_test';
     try {
       await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 2000 });
     } catch (e) {
-      // If local mongo is not running, unit tests test pure logic & mock handlers
+      // Mock/skip if mongo not running locally
     }
   });
 
@@ -152,6 +152,21 @@ describe('RecoverForge Core Verification Suite', () => {
       expect(result.recommendedAction).toBe('do_not_contact');
     });
 
+    it('falls back gracefully when OpenAI is unconfigured or times out', async () => {
+      process.env.FORCE_AI_FALLBACK = 'true';
+      const payment = {
+        amount: 99900,
+        errorCode: 'NETWORK_ERROR',
+        errorReason: 'gateway_timeout',
+        errorDescription: 'Connection timed out'
+      };
+      const result = await classifyFailure(payment);
+      expect(result.category).toBe('technical_error');
+      expect(result.recommendedAction).toBe('retry_now');
+      expect(result.isFallback).toBe(true);
+      delete process.env.FORCE_AI_FALLBACK;
+    });
+
     it('calculates nextActionAt timing properly for retry_next_morning in IST', () => {
       const timing = calculateNextActionAt('retry_next_morning');
       expect(timing).toBeInstanceOf(Date);
@@ -168,6 +183,20 @@ describe('RecoverForge Core Verification Suite', () => {
       expect(t1.getTime()).toBeGreaterThan(Date.now());
       expect(t2.getTime()).toBeGreaterThan(t1.getTime());
       expect(t3).toBeNull(); // 3 or more is capped (abandoned)
+    });
+  });
+
+  describe('6. Demo Seed Script Idempotency', () => {
+    it('handles idempotent execution when seeded data already exists', async () => {
+      if (mongoose.connection.readyState === 1) {
+        const res1 = await seed({ reset: false });
+        expect(res1.success).toBe(true);
+
+        // Second run must recognize existing count and not duplicate
+        const res2 = await seed({ reset: false });
+        expect(res2.success).toBe(true);
+        expect(res2.idempotent).toBe(true);
+      }
     });
   });
 });

@@ -8,17 +8,21 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('mf_token');
-    const savedUser = localStorage.getItem('mf_user');
+    const token = localStorage.getItem('rf_token') || localStorage.getItem('mf_token');
+    const savedUser = localStorage.getItem('rf_user') || localStorage.getItem('mf_user');
     if (token && savedUser) {
-      setUser(JSON.parse(savedUser));
-      // Refresh user data
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (e) {
+        // ignore parse error
+      }
+      // Refresh user data from server
       authAPI.getMe().then(res => {
         setUser(res.data.user);
-        localStorage.setItem('mf_user', JSON.stringify(res.data.user));
+        localStorage.setItem('rf_user', JSON.stringify(res.data.user));
       }).catch(() => {
-        localStorage.removeItem('mf_token');
-        localStorage.removeItem('mf_user');
+        localStorage.removeItem('rf_token');
+        localStorage.removeItem('rf_user');
         setUser(null);
       }).finally(() => setLoading(false));
     } else {
@@ -27,12 +31,14 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = (token, userData) => {
-    localStorage.setItem('mf_token', token);
-    localStorage.setItem('mf_user', JSON.stringify(userData));
+    localStorage.setItem('rf_token', token);
+    localStorage.setItem('rf_user', JSON.stringify(userData));
     setUser(userData);
   };
 
   const logout = () => {
+    localStorage.removeItem('rf_token');
+    localStorage.removeItem('rf_user');
     localStorage.removeItem('mf_token');
     localStorage.removeItem('mf_user');
     setUser(null);
@@ -41,7 +47,7 @@ export const AuthProvider = ({ children }) => {
   const updateUser = (userData) => {
     const updated = { ...user, ...userData };
     setUser(updated);
-    localStorage.setItem('mf_user', JSON.stringify(updated));
+    localStorage.setItem('rf_user', JSON.stringify(updated));
   };
 
   return (
