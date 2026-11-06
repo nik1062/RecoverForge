@@ -70,7 +70,7 @@ export default function OTPPage() {
           <div className="flex items-center justify-center size-10 rounded-lg bg-primary text-[#0a0a0f]">
             <span className="material-symbols-outlined text-2xl">bolt</span>
           </div>
-          <h2 className="text-xl font-bold font-syne uppercase">MailForge</h2>
+          <h2 className="text-xl font-bold font-syne uppercase">RecoverForge</h2>
         </Link>
       </header>
       <main className="flex-1 flex items-center justify-center p-6 relative z-10">

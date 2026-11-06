@@ -29,7 +29,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md">
         <Link to="/" className="flex items-center gap-2 justify-center mb-8 hover:opacity-80 transition-opacity">
           <span className="text-primary text-2xl">⚡</span>
-          <span className="text-xl font-bold text-white" style={{fontFamily:'Syne,sans-serif'}}>MailForge</span>
+          <span className="text-xl font-bold text-white" style={{fontFamily:'Syne,sans-serif'}}>RecoverForge</span>
         </Link>
         <div className="bg-surface-dark border border-border-dark rounded-2xl p-8 relative overflow-hidden">
           <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent opacity-60" />
@@ -38,7 +38,7 @@ export default function SignupPage() {
             <span className="text-xs text-text-muted">50 free credits — no card required</span>
           </div>
           <h1 className="text-2xl font-bold text-white mb-1">Create your account</h1>
-          <p className="text-text-muted text-sm mb-7">Start writing cold emails that actually convert</p>
+          <p className="text-text-muted text-sm mb-7">Recover failed Razorpay payments with AI</p>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>
               <label className="text-xs font-medium text-text-muted mb-1.5 block">Full Name</label>
