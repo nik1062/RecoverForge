@@ -1,0 +1,76 @@
+name: CI/CD Pipeline - RecoverForge
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Unit Tests & Build Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies & run tests
+        run: |
+          cd backend
+          npm ci
+          JWT_SECRET=ci_test_secret_key_1234567890 npm test
+
+      - name: Install frontend dependencies & verify build
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+  deploy:
+    name: Deploy to Production EC2
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          timeout: 120s
+          command_timeout: 30m
+          script: |
+            cd ~/RecoverForge || cd ~/ColdMailForge
+
+            # 1. Pull latest code
+            git fetch origin main
+            git reset --hard origin/main
+
+            # 2. Deploy Backend
+            cd backend
+            npm ci --production
+            pm2 restart recoverforge-backend || pm2 restart mailforge-backend || pm2 start server.js --name "recoverforge-backend"
+
+            # 3. Deploy Frontend
+            cd ../frontend
+            npm ci
+            npm run build
+
+            # 4. Verify Post-Deploy Health Check
+            sleep 3
+            curl -f -s http://localhost:5000/health || (echo "Health check failed!" && exit 1)
