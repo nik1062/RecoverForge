@@ -16,12 +16,40 @@ const { getNextFollowUpInterval, runSchedulerTick } = require('../services/sched
 const { seed } = require('../scripts/seedDemo');
 
 describe('RecoverForge Core Verification Suite', () => {
+  const memoryEvents = new Set();
+
   beforeAll(async () => {
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/recoverforge_test';
-    try {
-      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 2000 });
-    } catch (e) {
-      // Mock/skip if mongo not running locally
+    const mongoUri = process.env.MONGODB_URI;
+    if (mongoUri) {
+      try {
+        await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 2000 });
+      } catch (e) {
+        // Fall back to in-memory mocks
+      }
+    }
+
+    // In isolated test environments where MongoDB is not running, stub Mongoose operations
+    if (mongoose.connection.readyState !== 1) {
+      mongoose.set('bufferCommands', false);
+
+      jest.spyOn(WebhookEvent, 'findOne').mockImplementation(async ({ eventId }) => {
+        return memoryEvents.has(eventId) ? { eventId } : null;
+      });
+      jest.spyOn(WebhookEvent, 'create').mockImplementation(async ({ eventId, eventType }) => {
+        memoryEvents.add(eventId);
+        return { eventId, eventType };
+      });
+      jest.spyOn(FailedPayment, 'findOne').mockImplementation(async () => null);
+      jest.spyOn(FailedPayment, 'create').mockImplementation(async (data) => data);
+      jest.spyOn(FailedPayment, 'findOneAndUpdate').mockImplementation(async () => null);
+      jest.spyOn(AgentAction, 'create').mockImplementation(async (data) => data);
+      const mockMerchant = { _id: 'mock_m_1', agentActive: true };
+      jest.spyOn(User, 'findOne').mockReturnValue({
+        sort: jest.fn().mockResolvedValue(mockMerchant),
+        then: (resolve) => resolve(mockMerchant)
+      });
+      jest.spyOn(User, 'findById').mockResolvedValue(mockMerchant);
+      jest.spyOn(User, 'create').mockResolvedValue(mockMerchant);
     }
   });
 

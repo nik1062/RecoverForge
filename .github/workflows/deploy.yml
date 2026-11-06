@@ -10,14 +10,20 @@ jobs:
     name: Run Unit Tests & Build Checks
     runs-on: ubuntu-latest
 
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Node.js 18
+      - name: Setup Node.js 20
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 20
           cache: 'npm'
           cache-dependency-path: |
             backend/package-lock.json
@@ -27,7 +33,7 @@ jobs:
         run: |
           cd backend
           npm ci
-          JWT_SECRET=ci_test_secret_key_1234567890 npm test
+          JWT_SECRET=ci_test_secret_key_1234567890 MONGODB_URI=mongodb://127.0.0.1:27017/recoverforge_ci_test npm test
 
       - name: Install frontend dependencies & verify build
         run: |
