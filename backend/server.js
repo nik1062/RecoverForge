@@ -14,6 +14,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const connectDB = require('./config/db');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
+const { initScheduler } = require('./services/schedulerService');
 
 const app = express();
 
@@ -32,7 +33,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow non-browser requests (e.g. mobile apps, curl, server-to-server webhooks)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'test') {
       return callback(null, true);
@@ -44,7 +44,13 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Razorpay-Signature', 'X-Razorpay-Event-Id']
 }));
 
-// Standard JSON parser for non-webhook routes
+// Webhook endpoint receives RAW body stream for HMAC-SHA256 signature verification
+app.use('/webhooks', express.raw({ type: 'application/json' }), require('./routes/webhook'));
+
+// Customer Unsubscribe / Opt-Out endpoints
+app.use('/optout', require('./routes/optout'));
+
+// Standard JSON parser for all application API routes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -65,6 +71,7 @@ app.get('/', (req, res) => {
 // Route modules
 app.use('/auth', require('./routes/auth'));
 app.use('/payments', require('./routes/payment'));
+app.use('/failures', require('./routes/failures'));
 app.use('/admin', require('./routes/admin'));
 
 // Error handlers
@@ -75,6 +82,8 @@ const PORT = process.env.PORT || 5000;
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`🚀 RecoverForge server running on port ${PORT}`);
+    // Start background follow-up scheduler
+    initScheduler();
   });
 }
 
