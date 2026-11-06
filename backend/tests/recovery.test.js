@@ -246,10 +246,21 @@ describe('RecoverForge Core Verification Suite', () => {
     });
 
     it('renders unsubscribe confirmation page for valid opt-out token', async () => {
-      const validToken = 'test_token_valid_abc123';
-      if (mongoose.connection.readyState !== 1) {
-        jest.spyOn(FailedPayment, 'findOne').mockImplementationOnce(async ({ optOutToken }) => {
-          if (optOutToken === validToken) {
+      const validToken = `test_token_valid_${Date.now()}`;
+      let createdDoc = null;
+
+      if (mongoose.connection.readyState === 1) {
+        createdDoc = await FailedPayment.create({
+          merchantId: new mongoose.Types.ObjectId(),
+          razorpayPaymentId: `pay_optout_${Date.now()}`,
+          amount: 149900,
+          customerEmail: 'customer@test.com',
+          status: 'recovering',
+          optOutToken: validToken
+        });
+      } else {
+        jest.spyOn(FailedPayment, 'findOne').mockImplementation(async (query) => {
+          if (query && query.optOutToken === validToken) {
             return {
               _id: new mongoose.Types.ObjectId(),
               merchantId: new mongoose.Types.ObjectId(),
@@ -265,6 +276,10 @@ describe('RecoverForge Core Verification Suite', () => {
       const res = await request(app).get(`/optout/${validToken}`);
       expect(res.status).toBe(200);
       expect(res.text).toMatch(/You're Unsubscribed/i);
+
+      if (createdDoc) {
+        await FailedPayment.deleteOne({ _id: createdDoc._id });
+      }
     });
   });
 
