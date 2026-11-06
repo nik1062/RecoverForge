@@ -50,7 +50,7 @@ jobs:
     name: Deploy to Production EC2
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && secrets.HOST != ''
 
     steps:
       - name: Checkout code

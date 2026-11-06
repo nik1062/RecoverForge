@@ -240,46 +240,32 @@ describe('RecoverForge Core Verification Suite', () => {
 
   describe('7. Customer Opt-Out Flow (GET /optout/:token)', () => {
     it('returns 404 for unknown or missing opt-out token', async () => {
+      const spy = jest.spyOn(FailedPayment, 'findOne').mockResolvedValue(null);
       const res = await request(app).get('/optout/non_existent_token_123');
       expect(res.status).toBe(404);
       expect(res.text).toMatch(/Invalid or expired opt-out link/i);
+      spy.mockRestore();
     });
 
     it('renders unsubscribe confirmation page for valid opt-out token', async () => {
-      const validToken = `test_token_valid_${Date.now()}`;
-      let createdDoc = null;
+      const spy = jest.spyOn(FailedPayment, 'findOne').mockImplementation(async (query) => {
+        if (query && query.optOutToken === 'test_token_valid_abc123') {
+          return {
+            _id: new mongoose.Types.ObjectId(),
+            merchantId: new mongoose.Types.ObjectId(),
+            customerEmail: 'customer@test.com',
+            status: 'recovering',
+            optOutToken: 'test_token_valid_abc123',
+            save: jest.fn().mockResolvedValue(true)
+          };
+        }
+        return null;
+      });
 
-      if (mongoose.connection.readyState === 1) {
-        createdDoc = await FailedPayment.create({
-          merchantId: new mongoose.Types.ObjectId(),
-          razorpayPaymentId: `pay_optout_${Date.now()}`,
-          amount: 149900,
-          customerEmail: 'customer@test.com',
-          status: 'recovering',
-          optOutToken: validToken
-        });
-      } else {
-        jest.spyOn(FailedPayment, 'findOne').mockImplementation(async (query) => {
-          if (query && query.optOutToken === validToken) {
-            return {
-              _id: new mongoose.Types.ObjectId(),
-              merchantId: new mongoose.Types.ObjectId(),
-              customerEmail: 'customer@test.com',
-              status: 'recovering',
-              save: jest.fn().mockResolvedValue(true)
-            };
-          }
-          return null;
-        });
-      }
-
-      const res = await request(app).get(`/optout/${validToken}`);
+      const res = await request(app).get('/optout/test_token_valid_abc123');
       expect(res.status).toBe(200);
       expect(res.text).toMatch(/You're Unsubscribed/i);
-
-      if (createdDoc) {
-        await FailedPayment.deleteOne({ _id: createdDoc._id });
-      }
+      spy.mockRestore();
     });
   });
 
