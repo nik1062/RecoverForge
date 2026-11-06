@@ -50,13 +50,24 @@ jobs:
     name: Deploy to Production EC2
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && secrets.HOST != ''
+    if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check Deployment Secrets
+        id: check_secrets
+        run: |
+          if [ -z "${{ secrets.HOST }}" ] || [ -z "${{ secrets.SSH_KEY }}" ]; then
+            echo "::notice ::EC2 Deployment secrets (HOST/SSH_KEY) are not set. Skipping SSH deployment until secrets are configured."
+            echo "ready=false" >> $GITHUB_OUTPUT
+          else
+            echo "ready=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy to Server via SSH
+        if: steps.check_secrets.outputs.ready == 'true'
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.HOST }}
